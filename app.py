@@ -158,5 +158,4 @@ with st.expander("➕ Cargar Stock / Registrar Nuevo Producto"):
                             "categoria": nuevo_cat, "stock": nuevo_stk, "precio_venta": int(nuevo_pre)
                         }).execute()
                         st.success(f"Producto {nuevo_nom} creado.")
-
                         st.rerun()
