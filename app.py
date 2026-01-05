@@ -5,7 +5,7 @@ import pandas as pd
 # --- 1. CONFIGURACIÓN Y LIMPIEZA TOTAL DE INTERFAZ ---
 st.set_page_config(page_title="Gestión de Inventario JP", page_icon="📱", layout="wide")
 
-# CSS Avanzado para ocultar TODO: botón rojo, marca de agua, menú y cabecera
+# CSS Reforzado para ocultar botones de Streamlit y mejorar visualización
 hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
@@ -14,6 +14,8 @@ hide_st_style = """
             .stAppDeployButton {display:none !important;}
             #stDecoration {display:none !important;}
             [data-testid="stStatusWidget"] {display:none !important;}
+            /* Ajuste para que las tablas no ocupen demasiado espacio vertical */
+            .stTable {font-size: 14px;}
             </style>
             """
 st.markdown(hide_st_style, unsafe_allow_html=True)
@@ -62,12 +64,13 @@ if barcode:
     res = supabase.table("productos").select("*").eq("codigo_barras", barcode).execute()
     if res.data:
         prod = res.data[0]
-        @st.dialog(f"Producto: {prod['nombre']}")
+        @st.dialog(f"Vender: {prod['nombre']}")
         def ventana_venta(item):
+            st.write(f"**Categoría:** {item.get('categoria', 'Sin Categoría')}")
             st.write(f"**Stock:** {item['stock']} | **Precio:** {formatear_moneda(item['precio_venta'])}")
             if st.button("🛒 CONFIRMAR VENTA", type="primary", use_container_width=True):
                 realizar_venta(item['id'], item['stock'], item['nombre'], item['precio_venta'])
-            if st.button("❌ Cerrar", use_container_width=True):
+            if st.button("❌ Cancelar", use_container_width=True):
                 st.session_state["scanner_input"] = ""
                 st.rerun()
         ventana_venta(prod)
@@ -76,35 +79,40 @@ if barcode:
 
 st.divider()
 
-# --- 5. CUERPO PRINCIPAL: COLUMNAS (STOCK IZQ | VENTAS DER) ---
-# Definimos pesos: 2 para inventario (ancho) y 1 para ventas (más angosto)
-col_inv, col_ventas = st.columns([2, 1])
+# --- 5. CUERPO PRINCIPAL: STOCK POR CATEGORÍAS (IZQ) | VENTAS (DER) ---
+col_inv, col_ventas = st.columns([2.2, 0.8])
 
 with col_inv:
-    st.subheader("📦 Inventario Actual")
+    st.subheader("📦 Inventario por Categorías")
     try:
-        res_inv = supabase.table("productos").select("nombre, marca, stock, precio_venta").execute()
+        # Traemos todos los productos
+        res_inv = supabase.table("productos").select("nombre, marca, categoria, stock, precio_venta").execute()
         if res_inv.data:
-            # Botón de Alerta de Stock (Solo aparece si hay stock bajo)
-            bajo_stock = [p for p in res_inv.data if p['stock'] <= 5]
-            if bajo_stock:
-                if st.button(f"⚠️ {len(bajo_stock)} productos con Stock Bajo", type="secondary"):
-                    @st.dialog("🚨 Reposición Necesaria")
-                    def alerta(lista):
-                        st.table(pd.DataFrame(lista)[["nombre", "stock"]])
-                    alerta(bajo_stock)
+            df_full = pd.DataFrame(res_inv.data)
             
-            # Tabla de inventario
-            df_inv = pd.DataFrame(res_inv.data)
-            df_inv.columns = ["Producto", "Marca", "Stock", "Precio"]
-            st.table(df_inv.style.format({"Precio": lambda x: formatear_moneda(x)}))
-    except:
-        st.error("Error al conectar con el inventario.")
+            # Si la columna categoría no existe o está vacía, llenamos con "Otros"
+            if 'categoria' not in df_full.columns:
+                df_full['categoria'] = "Otros"
+            df_full['categoria'] = df_full['categoria'].fillna("Otros").replace("", "Otros")
+
+            # Obtenemos las categorías únicas para crear las pestañas
+            categorias = sorted(df_full['categoria'].unique())
+            tabs_cat = st.tabs(categorias)
+
+            # Llenamos cada pestaña con su tabla correspondiente
+            for i, cat in enumerate(categorias):
+                with tabs_cat[i]:
+                    df_cat = df_full[df_full['categoria'] == cat][["nombre", "marca", "stock", "precio_venta"]]
+                    df_cat.columns = ["Producto", "Marca", "Stock", "Precio"]
+                    st.table(df_cat.style.format({"Precio": lambda x: formatear_moneda(x)}))
+        else:
+            st.info("El inventario está vacío.")
+    except Exception as e:
+        st.error(f"Error al cargar inventario: {e}")
 
 with col_ventas:
     st.subheader("📈 Ventas")
     t_hoy, t_mes = st.tabs(["Hoy", "Mes"])
-    
     with t_hoy:
         fecha_hoy = pd.Timestamp.now().strftime('%Y-%m-%d')
         res_v = supabase.table("ventas").select("nombre_producto, cantidad").gte("created_at", fecha_hoy).execute()
@@ -112,9 +120,7 @@ with col_ventas:
             df_v = pd.DataFrame(res_v.data).groupby("nombre_producto")["cantidad"].sum().reset_index()
             df_v.columns = ["Producto", "Cant."]
             st.table(df_v)
-        else:
-            st.info("Hoy no hay ventas.")
-
+        else: st.info("Sin ventas hoy.")
     with t_mes:
         fecha_mes = pd.Timestamp.now().replace(day=1).strftime('%Y-%m-%d')
         res_m = supabase.table("ventas").select("nombre_producto, cantidad").gte("created_at", fecha_mes).execute()
@@ -122,32 +128,42 @@ with col_ventas:
             df_m = pd.DataFrame(res_m.data).groupby("nombre_producto")["cantidad"].sum().reset_index()
             df_m.columns = ["Producto", "Total"]
             st.table(df_m)
-        else:
-            st.info("Sin registros este mes.")
+        else: st.info("Sin registros.")
 
-# --- 6. SECCIÓN INFERIOR: CARGA ---
+# --- 6. SECCIÓN INFERIOR: CARGA Y NUEVOS ---
 st.divider()
-with st.expander("➕ Cargar Stock / Nuevo Producto"):
-    c_cod = st.text_input("Escanear para CARGA", key="carga_field")
+with st.expander("➕ Cargar Stock / Registrar Producto Nuevo"):
+    c_cod = st.text_input("Escanear código para CARGA", key="carga_field")
     if c_cod:
         res_c = supabase.table("productos").select("*").eq("codigo_barras", c_cod).execute()
         if res_c.data:
             it = res_c.data[0]
-            with st.form("upd"):
-                st.info(f"Producto: {it['nombre']}")
-                n_st = st.number_input("Cantidad a sumar", min_value=1)
-                if st.form_submit_button("✅ ACTUALIZAR"):
+            with st.form("sumar_stock"):
+                st.info(f"Producto: {it['nombre']} ({it.get('categoria', 'Otros')})")
+                n_st = st.number_input("Cantidad a sumar", min_value=1, step=1)
+                if st.form_submit_button("✅ ACTUALIZAR STOCK"):
                     supabase.table("productos").update({"stock": it['stock'] + n_st}).eq("id", it['id']).execute()
-                    st.success("¡Stock sumado!")
+                    st.success("¡Stock actualizado!")
                     st.rerun()
         else:
-            with st.form("new"):
-                st.warning("Nuevo producto")
-                n_nom = st.text_input("Nombre")
-                n_pre = st.number_input("Precio", min_value=0)
-                n_stk = st.number_input("Stock inicial", min_value=1)
-                if st.form_submit_button("🚀 REGISTRAR"):
-                    supabase.table("productos").insert({
-                        "nombre": n_nom, "codigo_barras": c_cod, "stock": n_stk, "precio_venta": int(n_pre)
-                    }).execute()
-                    st.rerun()
+            with st.form("nuevo_producto"):
+                st.warning("🆕 REGISTRO DE PRODUCTO NUEVO")
+                col1, col2 = st.columns(2)
+                with col1:
+                    n_nom = st.text_input("Nombre del Producto *")
+                    n_mar = st.text_input("Marca")
+                    n_cat = st.selectbox("Categoría", ["Celulares", "Accesorios", "Control Remoto", "Cargadores", "Otros"])
+                with col2:
+                    n_pre = st.number_input("Precio de Venta", min_value=0, step=500)
+                    n_stk = st.number_input("Stock Inicial", min_value=1, step=1)
+                
+                if st.form_submit_button("🚀 REGISTRAR E INGRESAR"):
+                    if n_nom:
+                        supabase.table("productos").insert({
+                            "nombre": n_nom, "codigo_barras": c_cod, "marca": n_mar,
+                            "categoria": n_cat, "stock": n_stk, "precio_venta": int(n_pre)
+                        }).execute()
+                        st.success("Producto creado exitosamente.")
+                        st.rerun()
+                    else:
+                        st.error("El nombre es obligatorio.")
