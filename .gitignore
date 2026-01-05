@@ -1,0 +1,25 @@
+# Secretos y credenciales (IMPORTANTE)
+.streamlit/
+secrets.toml
+
+# Entorno virtual de Python
+venv/
+.venv/
+env/
+bin/
+lib/
+Include/
+Scripts/
+pyvenv.cfg
+
+# Archivos de caché de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Archivos temporales del sistema
+.DS_Store
+Thumbs.db
+
+# Otros (opcional)
+.env
