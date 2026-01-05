@@ -34,7 +34,7 @@ def formatear_moneda(valor):
     except: return f"$ {valor}"
 
 # --- 3. INTERFAZ DE ESCÁNER (VENTA) ---
-st.title("📱 Sistema de Control JP")
+st.title("📱 Sistema de Control e Inventario")
 
 if "scanner_input" not in st.session_state:
     st.session_state["scanner_input"] = ""
@@ -158,4 +158,5 @@ with st.expander("➕ Cargar Stock / Registrar Nuevo Producto"):
                             "categoria": nuevo_cat, "stock": nuevo_stk, "precio_venta": int(nuevo_pre)
                         }).execute()
                         st.success(f"Producto {nuevo_nom} creado.")
+
                         st.rerun()
