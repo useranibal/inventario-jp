@@ -3,7 +3,13 @@ from supabase import create_client, Client
 import pandas as pd
 
 # --- 1. CONFIGURACIÓN Y LIMPIEZA DE INTERFAZ ---
-st.set_page_config(page_title="Gestión de Inventario JP", page_icon="📱", layout="wide")
+# Forzamos que el estado inicial del sidebar sea "expanded" (expandido)
+st.set_page_config(
+    page_title="Gestión de Inventario JP", 
+    page_icon="📱", 
+    layout="wide",
+    initial_sidebar_state="expanded" 
+)
 
 hide_st_style = """
             <style>
@@ -14,20 +20,26 @@ hide_st_style = """
             #stDecoration {display:none !important;}
             [data-testid="stStatusWidget"] {display:none !important;}
             
-            /* Color de fondo para la barra lateral (Sidebar) */
+            /* Color de fondo para la barra lateral */
             [data-testid="stSidebar"] {
-                background-color: #2e2e2e;
+                background-color: #2e2e2e !important;
             }
             [data-testid="stSidebar"] * {
-                color: white;
+                color: white !important;
             }
 
-            /* HACER EL BOTÓN DE "MOSTRAR MENÚ" MÁS VISIBLE CUANDO SE OCULTA */
-            button[kind="headerNoPadding"] {
+            /* BOTÓN DE REAPERTURA: Lo hacemos GRANDE y NARANJA */
+            [data-testid="stSidebarCollapsedControl"] {
                 background-color: #d35400 !important;
                 color: white !important;
-                border-radius: 50% !important;
-                padding: 5px !important;
+                border-radius: 0 10px 10px 0 !important;
+                width: 50px !important;
+                height: 50px !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                left: 0 !important;
+                top: 10px !important;
             }
 
             /* Estilo para los botones del menú lateral */
@@ -80,40 +92,45 @@ def formatear_moneda(valor):
     try: return f"$ {int(float(valor)):,}".replace(",", ".")
     except: return f"$ {valor}"
 
-# --- 4. BARRA LATERAL (SIDEBAR) ---
+# --- 4. BARRA LATERAL (SIEMPRE DISPONIBLE) ---
 with st.sidebar:
     st.markdown("<h2 style='text-align: center;'>🛠 MENÚ</h2>", unsafe_allow_html=True)
     st.divider()
 
+    # Carga de datos
     res_data = supabase.table("productos").select("*").execute()
     df_full = pd.DataFrame(res_data.data) if res_data.data else pd.DataFrame()
     
-    if not df_full.empty:
-        bajo_stock = df_full[df_full['stock'] <= 5]
-        label_alerta = f"🚨 ALERTAS ({len(bajo_stock)})" if not bajo_stock.empty else "✅ STOCK OK"
-        if st.button(label_alerta):
-            if not bajo_stock.empty:
-                @st.dialog("Stock Bajo")
-                def d_a(): st.table(bajo_stock[["nombre", "stock"]])
-                d_a()
-            else: st.toast("Todo en orden.")
+    # Asegurar columnas mínimas para evitar errores
+    for c in ['nombre', 'stock', 'categoria', 'marca', 'precio_venta']:
+        if c not in df_full.columns: df_full[c] = "N/A"
 
+    # Botón Alertas
+    bajo_stock = df_full[df_full['stock'].apply(lambda x: pd.to_numeric(x, errors='coerce')).fillna(0) <= 5]
+    label_alerta = f"🚨 ALERTAS ({len(bajo_stock)})" if not bajo_stock.empty else "✅ STOCK OK"
+    if st.button(label_alerta):
+        @st.dialog("Reponer Stock")
+        def d_a(): st.table(bajo_stock[["nombre", "stock"]])
+        d_a()
+
+    # Botón Ventas
     if st.button("📊 RESUMEN VENTAS"):
-        @st.dialog("Ventas Registradas")
+        @st.dialog("Resumen de Ventas")
         def d_v():
             t1, t2 = st.tabs(["Hoy", "Mes"])
             with t1:
-                hoy = pd.Timestamp.now().strftime('%Y-%m-%d')
+                hoy = pd.Timestamp.now(tz='America/Santiago').strftime('%Y-%m-%d')
                 res_h = supabase.table("ventas").select("nombre_producto, cantidad").gte("created_at", hoy).execute()
                 if res_h.data: st.table(pd.DataFrame(res_h.data).groupby("nombre_producto").sum())
-                else: st.info("No hay ventas hoy.")
+                else: st.info("Sin ventas hoy.")
             with t2:
-                mes = pd.Timestamp.now().replace(day=1).strftime('%Y-%m-%d')
+                mes = pd.Timestamp.now(tz='America/Santiago').replace(day=1).strftime('%Y-%m-%d')
                 res_m = supabase.table("ventas").select("nombre_producto, cantidad").gte("created_at", mes).execute()
                 if res_m.data: st.table(pd.DataFrame(res_m.data).groupby("nombre_producto").sum())
                 else: st.info("Sin registros.")
         d_v()
 
+    # Botón Carga
     if st.button("➕ CARGA / NUEVO"):
         @st.dialog("Ingreso Mercadería")
         def d_c():
@@ -142,7 +159,7 @@ with st.sidebar:
 st.markdown('<h1 style="background-color: #d35400; color: white; padding: 15px; text-align: center; border-radius: 10px;">📱 Sistema de Control JP</h1>', unsafe_allow_html=True)
 st.write("")
 
-barcode = st.text_input("🔍 ESCANEÉ AQUÍ PARA VENDER O CONSULTAR PRECIO", value="")
+barcode = st.text_input("🔍 ESCANEÉ AQUÍ PARA VENDER O CONSULTAR PRECIO", value="", key="scanner_venta")
 
 if barcode:
     res_b = supabase.table("productos").select("*").eq("codigo_barras", barcode).execute()
@@ -159,9 +176,6 @@ st.divider()
 
 # --- 6. TABLAS POR CATEGORÍA ---
 if not df_full.empty:
-    for col in ['categoria', 'marca', 'nombre', 'stock', 'precio_venta']:
-        if col not in df_full.columns: df_full[col] = "N/A"
-    
     df_full['categoria'] = df_full['categoria'].fillna("Otros").replace("", "Otros")
     categorias = sorted(df_full['categoria'].unique())
     tabs = st.tabs(categorias)
