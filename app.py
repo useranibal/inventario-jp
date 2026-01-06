@@ -10,7 +10,7 @@ st.set_page_config(
     initial_sidebar_state="expanded" 
 )
 
-# CSS REFORZADO PARA COLORES, BOTÓN >> Y NOTIFICACIÓN DE ALERTA
+# CSS AJUSTADO
 hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
@@ -41,22 +41,16 @@ hide_st_style = """
                 border: 1px solid #666;
             }
 
-            /* Estilo para la leyenda de alerta de stock */
-            .stock-alert-box {
+            /* Estilo para la leyenda de alerta de stock en la parte inferior */
+            .stock-alert-bottom {
                 background-color: #e74c3c;
                 color: white;
-                padding: 10px;
-                border-radius: 5px;
+                padding: 15px;
+                border-radius: 10px;
                 text-align: center;
                 font-weight: bold;
-                margin-bottom: 20px;
-                border: 2px solid #ffffff;
-                animation: pulse 2s infinite;
-            }
-            @keyframes pulse {
-                0% { opacity: 1; }
-                50% { opacity: 0.7; }
-                100% { opacity: 1; }
+                border: 1px solid #ffffff;
+                margin-top: 20px;
             }
             </style>
             """
@@ -96,87 +90,87 @@ with st.sidebar:
     st.markdown("### 🛠 MENÚ DE CONTROL")
     st.divider()
 
-    # Obtener datos para el inventario y alertas
+    # Obtener datos
     res_data = supabase.table("productos").select("*").execute()
     df_full = pd.DataFrame(res_data.data) if res_data.data else pd.DataFrame()
 
-    # --- LEYENDA DE ALERTA PROACTIVA ---
-    if not df_full.empty:
-        bajo = df_full[df_full['stock'].apply(pd.to_numeric, errors='coerce').fillna(0) <= 5]
-        if not bajo.empty:
-            # Esta leyenda aparece solo si hay productos con bajo stock
-            st.markdown(f"""
-                <div class="stock-alert-box">
-                    ⚠️ ATENCIÓN<br>
-                    Tienes {len(bajo)} productos con stock mínimo
-                </div>
-            """, unsafe_allow_html=True)
-
-    # Botones del Menú
+    # Botones principales
     if st.button("🚨 VER DETALLE ALERTAS"):
-        if not df_full.empty and not bajo.empty:
-            @st.dialog("Productos por Reponer")
-            def d_a(): st.table(bajo[["nombre", "stock"]])
-            d_a()
-        else: st.toast("No hay alertas de stock.")
+        if not df_full.empty:
+            bajo = df_full[df_full['stock'].apply(pd.to_numeric, errors='coerce').fillna(0) <= 5]
+            if not bajo.empty:
+                @st.dialog("Productos por Reponer")
+                def d_a(): st.table(bajo[["nombre", "stock"]])
+                d_a()
+            else: st.toast("No hay alertas.")
 
     if st.button("📊 RESUMEN VENTAS"):
         @st.dialog("Resumen de Ventas")
         def d_v():
-            tab_hoy, tab_mes = st.tabs(["Hoy", "Mes"])
-            with tab_hoy:
+            t1, t2 = st.tabs(["Hoy", "Mes"])
+            with t1:
                 hoy = pd.Timestamp.now().strftime('%Y-%m-%d')
-                res_h = supabase.table("ventas").select("nombre_producto, cantidad").gte("created_at", hoy).execute()
-                if res_h.data:
-                    st.table(pd.DataFrame(res_h.data).groupby("nombre_producto").sum().reset_index())
-                else: st.info("Sin ventas hoy.")
-            with tab_mes:
-                inicio_mes = pd.Timestamp.now().replace(day=1).strftime('%Y-%m-%d')
-                res_m = supabase.table("ventas").select("nombre_producto, cantidad").gte("created_at", inicio_mes).execute()
-                if res_m.data:
-                    st.table(pd.DataFrame(res_m.data).groupby("nombre_producto").sum().reset_index())
-                else: st.info("Sin ventas este mes.")
+                res = supabase.table("ventas").select("nombre_producto, cantidad").gte("created_at", hoy).execute()
+                if res.data: st.table(pd.DataFrame(res.data).groupby("nombre_producto").sum().reset_index())
+                else: st.info("Sin ventas.")
+            with t2:
+                mes = pd.Timestamp.now().replace(day=1).strftime('%Y-%m-%d')
+                res_m = supabase.table("ventas").select("nombre_producto, cantidad").gte("created_at", mes).execute()
+                if res_m.data: st.table(pd.DataFrame(res_m.data).groupby("nombre_producto").sum().reset_index())
+                else: st.info("Sin registros.")
         d_v()
 
     if st.button("➕ CARGA / NUEVO"):
         @st.dialog("Gestión de Stock")
         def d_c():
-            c = st.text_input("Código de barras")
+            c = st.text_input("Código")
             if c:
                 ex = supabase.table("productos").select("*").eq("codigo_barras", c).execute()
                 if ex.data:
                     it = ex.data[0]
-                    st.info(f"Producto: {it['nombre']}")
-                    n = st.number_input("Sumar stock", min_value=1)
-                    if st.button("ACTUALIZAR"):
+                    n = st.number_input("Sumar", min_value=1)
+                    if st.button("OK"):
                         supabase.table("productos").update({"stock": it['stock']+n}).eq("id", it['id']).execute()
                         st.rerun()
                 else:
-                    st.warning("🆕 Producto Nuevo")
                     n_nom = st.text_input("Nombre")
                     n_mar = st.text_input("Marca")
                     n_cat = st.selectbox("Categoría", ["Accesorios", "Celulares", "Control remoto", "Otros"])
                     n_pre = st.number_input("Precio", min_value=0)
-                    if st.button("REGISTRAR"):
+                    if st.button("GUARDAR"):
                         supabase.table("productos").insert({"nombre": n_nom, "codigo_barras": c, "marca": n_mar, "categoria": n_cat, "stock": 1, "precio_venta": int(n_pre)}).execute()
                         st.rerun()
         d_c()
 
+    # --- ALERTA EN LA PARTE INFERIOR (MARCADA EN ROJO) ---
+    # Agregamos espacios para empujar la alerta hacia abajo
+    st.write("")
+    st.write("")
+    
+    if not df_full.empty:
+        bajo_stock = df_full[df_full['stock'].apply(pd.to_numeric, errors='coerce').fillna(0) <= 5]
+        if not bajo_stock.empty:
+            st.markdown(f"""
+                <div class="stock-alert-bottom">
+                    ⚠️ ATENCIÓN<br>
+                    Hay {len(bajo_stock)} productos con<br>stock mínimo
+                </div>
+            """, unsafe_allow_html=True)
+
 # --- 5. CUERPO CENTRAL ---
 st.markdown('<h1 style="background-color: #d35400; color: white; padding: 15px; text-align: center; border-radius: 10px;">📱 Sistema de Control JP</h1>', unsafe_allow_html=True)
 
-barcode = st.text_input("🔍 ESCANEÉ AQUÍ PARA VENDER", value="", key="v_main")
+barcode = st.text_input("🔍 ESCANEÉ AQUÍ PARA VENDER", key="v_main")
 
 if barcode:
     res_b = supabase.table("productos").select("*").eq("codigo_barras", barcode).execute()
     if res_b.data:
         p = res_b.data[0]
         @st.dialog(f"Venta: {p['nombre']}")
-        def d_venta_modal(item):
-            st.write(f"**Stock:** {item['stock']} | **Precio:** {formatear_moneda(item['precio_venta'])}")
-            if st.button("CONFIRMAR VENTA", type="primary", use_container_width=True):
-                realizar_venta(item['id'], item['stock'], item['nombre'], item['precio_venta'])
-        d_venta_modal(p)
+        def d_v(item):
+            st.write(f"Stock: {item['stock']} | Precio: {formatear_moneda(item['precio_venta'])}")
+            if st.button("CONFIRMAR VENTA", type="primary"): realizar_venta(item['id'], item['stock'], item['nombre'], item['precio_venta'])
+        d_v(p)
 
 st.divider()
 
