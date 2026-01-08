@@ -61,7 +61,22 @@ with st.sidebar:
     st.markdown("### 🛠 MENÚ DE CONTROL")
     st.divider()
 
-    # Botones de Reportes
+    # Obtener datos para Alertas y Tablas
+    res_data = supabase.table("productos").select("*").execute()
+    df_full = pd.DataFrame(res_data.data) if res_data.data else pd.DataFrame()
+
+    # --- REINTEGRO DE BOTÓN DE ALERTAS ---
+    if st.button("🚨 VER DETALLE ALERTAS"):
+        if not df_full.empty:
+            bajo = df_full[df_full['stock'].apply(pd.to_numeric, errors='coerce').fillna(0) <= 5]
+            if not bajo.empty:
+                @st.dialog("Productos por Reponer")
+                def d_alertas():
+                    st.table(bajo[["nombre", "marca", "stock"]])
+                d_alertas()
+            else:
+                st.toast("No hay productos con stock bajo.")
+
     if st.button("📊 RESUMEN VENTAS"):
         @st.dialog("Ventas")
         def d_v():
@@ -84,103 +99,92 @@ with st.sidebar:
                 ex = supabase.table("productos").select("*").eq("codigo_barras", cod).execute()
                 if ex.data:
                     it = ex.data[0]
-                    st.success(f"Producto detectado: {it['nombre']}")
-                    cant = st.number_input("Cantidad a sumar al stock", min_value=1, value=1)
-                    if st.button("ACTUALIZAR STOCK"):
+                    st.success(f"Producto: {it['nombre']}")
+                    cant = st.number_input("Sumar al stock", min_value=1, value=1)
+                    if st.button("ACTUALIZAR"):
                         supabase.table("productos").update({"stock": it['stock'] + cant}).eq("id", it['id']).execute()
                         st.rerun()
                 else:
-                    st.warning("🆕 REGISTRAR PRODUCTO NUEVO")
-                    c_nom = st.text_input("Nombre del Producto")
+                    st.warning("🆕 REGISTRAR NUEVO")
+                    c_nom = st.text_input("Nombre")
                     c_mar = st.text_input("Marca")
-                    c_cat = st.text_input("Categoría (Escríbela manualmente)")
-                    col_a, col_b = st.columns(2)
-                    with col_a:
-                        c_costo = st.number_input("Precio Costo", min_value=0, step=100)
-                        c_stk = st.number_input("Stock Inicial", min_value=1, value=1)
-                    with col_b:
-                        c_venta = st.number_input("Precio Venta", min_value=0, step=100)
-                    
-                    if st.button("GUARDAR TODO"):
-                        if c_nom and c_cat:
-                            supabase.table("productos").insert({
-                                "nombre": c_nom, "codigo_barras": cod, "marca": c_mar,
-                                "categoria": c_cat, "precio_costo": int(c_costo),
-                                "precio_venta": int(c_venta), "stock": int(c_stk)
-                            }).execute()
-                            st.rerun()
-                        else: st.error("Nombre y Categoría son obligatorios")
+                    c_cat = st.text_input("Categoría")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        c_costo = st.number_input("Costo", min_value=0)
+                        c_stk = st.number_input("Stock Inicial", min_value=1)
+                    with col2:
+                        c_venta = st.number_input("Venta", min_value=0)
+                    if st.button("GUARDAR"):
+                        supabase.table("productos").insert({
+                            "nombre": c_nom, "codigo_barras": cod, "marca": c_mar,
+                            "categoria": c_cat, "precio_costo": int(c_costo),
+                            "precio_venta": int(c_venta), "stock": int(c_stk)
+                        }).execute()
+                        st.rerun()
         d_carga_completa()
 
     # Alerta Inferior
     st.markdown("<br><br>", unsafe_allow_html=True)
-    res_alert = supabase.table("productos").select("stock").execute()
-    if res_alert.data:
-        df_a = pd.DataFrame(res_alert.data)
-        bajo = df_a[df_a['stock'] <= 5]
-        if not bajo.empty:
-            st.markdown(f'<div class="stock-alert-bottom">⚠️ ATENCIÓN<br>Hay {len(bajo)} productos con<br>stock mínimo</div>', unsafe_allow_html=True)
+    if not df_full.empty:
+        bajo_count = len(df_full[df_full['stock'] <= 5])
+        if bajo_count > 0:
+            st.markdown(f'<div class="stock-alert-bottom">⚠️ ATENCIÓN<br>Hay {bajo_count} productos con<br>stock mínimo</div>', unsafe_allow_html=True)
 
 # --- 5. CUERPO CENTRAL ---
 st.markdown('<h1 style="background-color: #d35400; color: white; padding: 15px; text-align: center; border-radius: 10px;">📱 Sistema de Control JP</h1>', unsafe_allow_html=True)
 
-# SECCIÓN DE VENTA
 barcode = st.text_input("🔍 ESCANEÉ AQUÍ PARA VENDER", value="", key=f"v_main_{st.session_state.scanner_key}")
 if barcode:
     res_b = supabase.table("productos").select("*").eq("codigo_barras", barcode).execute()
     if res_b.data:
         p = res_b.data[0]
         @st.dialog("Confirmar Venta")
-        def d_v(item):
-            st.write(f"**{item['nombre']}** ({item.get('marca','')})")
+        def d_venta(item):
+            st.write(f"**{item['nombre']}**")
             st.write(f"Precio: {formatear_moneda(item['precio_venta'])} | Stock: {item['stock']}")
             if st.button("🛒 CONFIRMAR VENTA", type="primary"): realizar_venta(item['id'], item['stock'], item['nombre'], item['precio_venta'])
             if st.button("CANCELAR"): 
                 st.session_state.scanner_key += 1
                 st.rerun()
-        d_v(p)
+        d_venta(p)
 
 st.divider()
 
-# --- 6. BUSCADOR Y TABLAS (FRAGMENTADO) ---
+# --- 6. BUSCADOR FLEXIBLE Y TABLAS ---
 @st.fragment(run_every=15)
 def seccion_inventario():
-    st.subheader("📦 Consulta de Productos")
-    
-    # Fila de búsqueda
+    # Buscador de coincidencias parciales
     col_bus, col_limp = st.columns([4, 1])
     with col_bus:
-        busqueda = st.text_input("Escribe nombre, marca o categoría para buscar...", value=st.session_state.search_query, placeholder="Ej: Samsung")
+        query = st.text_input("🔍 Buscar por Nombre, Marca o Categoría...", value=st.session_state.search_query)
     with col_limp:
-        st.write(" ") # Espacio
+        st.write(" ")
         if st.button("🧹 Limpiar"):
             st.session_state.search_query = ""
             st.rerun()
 
-    # Cargar datos frescos
+    # Cargar datos
     data_res = supabase.table("productos").select("*").execute()
     df = pd.DataFrame(data_res.data) if data_res.data else pd.DataFrame()
 
     if not df.empty:
-        # Aplicar filtro si hay búsqueda
-        if busqueda:
-            st.session_state.search_query = busqueda
-            mask = df.apply(lambda row: busqueda.lower() in row.astype(str).str.lower().values, axis=1)
+        if query:
+            st.session_state.search_query = query
+            # FILTRO FLEXIBLE: Busca la palabra en cualquier parte del texto
+            mask = df.apply(lambda row: row.astype(str).str.contains(query, case=False, na=False)).any(axis=1)
             df_filtered = df[mask]
-        else:
-            df_filtered = df
-
-        if busqueda:
-            st.write(f"Resultados para: **{busqueda}**")
+            
+            st.write(f"Mostrando resultados para: **{query}**")
             st.table(df_filtered[["nombre", "marca", "categoria", "stock", "precio_venta"]].rename(columns={"nombre":"Producto","precio_venta":"Precio"}))
         else:
-            # Vista por Categorías (Pestañas)
-            df_filtered['categoria'] = df_filtered['categoria'].fillna("Otros").replace("", "Otros")
-            cats = sorted(df_filtered['categoria'].unique())
+            # Vista normal por pestañas
+            df['categoria'] = df['categoria'].fillna("Otros").replace("", "Otros")
+            cats = sorted(df['categoria'].unique())
             tabs = st.tabs(cats)
             for i, cat in enumerate(cats):
                 with tabs[i]:
-                    df_cat = df_filtered[df_filtered['categoria'] == cat][["nombre", "marca", "stock", "precio_venta"]]
+                    df_cat = df[df['categoria'] == cat][["nombre", "marca", "stock", "precio_venta"]]
                     st.table(df_cat.rename(columns={"nombre":"Producto", "precio_venta":"Precio"}))
 
 seccion_inventario()
