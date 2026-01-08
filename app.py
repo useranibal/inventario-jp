@@ -127,7 +127,7 @@ with st.sidebar:
     # Alerta Inferior
     st.markdown("<br><br>", unsafe_allow_html=True)
     if not df_full.empty:
-        bajo_count = len(df_full[df_full['stock'] <= 5])
+        bajo_count = len(df_full[df_full['stock'] <= 3])
         if bajo_count > 0:
             st.markdown(f'<div class="stock-alert-bottom">⚠️ ATENCIÓN<br>Hay {bajo_count} productos con<br>stock mínimo</div>', unsafe_allow_html=True)
 
