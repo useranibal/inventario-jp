@@ -10,6 +10,9 @@ st.set_page_config(
     initial_sidebar_state="expanded" 
 )
 
+# Definimos el stock mínimo global aquí para que sea fácil cambiarlo después
+STOCK_MINIMO = 3
+
 if "scanner_key" not in st.session_state:
     st.session_state.scanner_key = 0
 if "search_query" not in st.session_state:
@@ -61,21 +64,22 @@ with st.sidebar:
     st.markdown("### 🛠 MENÚ DE CONTROL")
     st.divider()
 
-    # Obtener datos para Alertas y Tablas
+    # Obtener datos frescos para el Sidebar
     res_data = supabase.table("productos").select("*").execute()
     df_full = pd.DataFrame(res_data.data) if res_data.data else pd.DataFrame()
 
-    # --- REINTEGRO DE BOTÓN DE ALERTAS ---
+    # BOTÓN DE ALERTAS (Ahora con límite de 3)
     if st.button("🚨 VER DETALLE ALERTAS"):
         if not df_full.empty:
-            bajo = df_full[df_full['stock'].apply(pd.to_numeric, errors='coerce').fillna(0) <= 5]
+            bajo = df_full[df_full['stock'].apply(pd.to_numeric, errors='coerce').fillna(0) <= STOCK_MINIMO]
             if not bajo.empty:
                 @st.dialog("Productos por Reponer")
                 def d_alertas():
+                    st.write(f"Productos con stock menor o igual a {STOCK_MINIMO}:")
                     st.table(bajo[["nombre", "marca", "stock"]])
                 d_alertas()
             else:
-                st.toast("No hay productos con stock bajo.")
+                st.toast("✅ Todo el stock está al día.")
 
     if st.button("📊 RESUMEN VENTAS"):
         @st.dialog("Ventas")
@@ -86,9 +90,11 @@ with st.sidebar:
             with t1:
                 rh = supabase.table("ventas").select("nombre_producto, cantidad").gte("created_at", hoy).execute()
                 if rh.data: st.table(pd.DataFrame(rh.data).groupby("nombre_producto").sum().reset_index())
+                else: st.info("No hay ventas registradas hoy.")
             with t2:
                 rm = supabase.table("ventas").select("nombre_producto, cantidad").gte("created_at", mes).execute()
                 if rm.data: st.table(pd.DataFrame(rm.data).groupby("nombre_producto").sum().reset_index())
+                else: st.info("No hay ventas registradas este mes.")
         d_v()
 
     if st.button("➕ CARGAR / NUEVO PRODUCTO"):
@@ -105,31 +111,33 @@ with st.sidebar:
                         supabase.table("productos").update({"stock": it['stock'] + cant}).eq("id", it['id']).execute()
                         st.rerun()
                 else:
-                    st.warning("🆕 REGISTRAR NUEVO")
-                    c_nom = st.text_input("Nombre")
+                    st.warning("🆕 REGISTRAR NUEVO PRODUCTO")
+                    c_nom = st.text_input("Nombre del Producto")
                     c_mar = st.text_input("Marca")
                     c_cat = st.text_input("Categoría")
                     col1, col2 = st.columns(2)
                     with col1:
-                        c_costo = st.number_input("Costo", min_value=0)
+                        c_costo = st.number_input("Precio Costo", min_value=0)
                         c_stk = st.number_input("Stock Inicial", min_value=1)
                     with col2:
-                        c_venta = st.number_input("Venta", min_value=0)
+                        c_venta = st.number_input("Precio Venta", min_value=0)
                     if st.button("GUARDAR"):
-                        supabase.table("productos").insert({
-                            "nombre": c_nom, "codigo_barras": cod, "marca": c_mar,
-                            "categoria": c_cat, "precio_costo": int(c_costo),
-                            "precio_venta": int(c_venta), "stock": int(c_stk)
-                        }).execute()
-                        st.rerun()
+                        if c_nom and c_cat:
+                            supabase.table("productos").insert({
+                                "nombre": c_nom, "codigo_barras": cod, "marca": c_mar,
+                                "categoria": c_cat, "precio_costo": int(c_costo),
+                                "precio_venta": int(c_venta), "stock": int(c_stk)
+                            }).execute()
+                            st.rerun()
+                        else: st.error("Nombre y Categoría son necesarios.")
         d_carga_completa()
 
-    # Alerta Inferior
+    # Alerta Inferior Dinámica (Límite 3)
     st.markdown("<br><br>", unsafe_allow_html=True)
     if not df_full.empty:
-        bajo_count = len(df_full[df_full['stock'] <= 3])
+        bajo_count = len(df_full[df_full['stock'] <= STOCK_MINIMO])
         if bajo_count > 0:
-            st.markdown(f'<div class="stock-alert-bottom">⚠️ ATENCIÓN<br>Hay {bajo_count} productos con<br>stock mínimo</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="stock-alert-bottom">⚠️ ATENCIÓN<br>Hay {bajo_count} productos con<br>stock mínimo (≤ {STOCK_MINIMO})</div>', unsafe_allow_html=True)
 
 # --- 5. CUERPO CENTRAL ---
 st.markdown('<h1 style="background-color: #d35400; color: white; padding: 15px; text-align: center; border-radius: 10px;">📱 Sistema de Control JP</h1>', unsafe_allow_html=True)
@@ -154,7 +162,6 @@ st.divider()
 # --- 6. BUSCADOR FLEXIBLE Y TABLAS ---
 @st.fragment(run_every=15)
 def seccion_inventario():
-    # Buscador de coincidencias parciales
     col_bus, col_limp = st.columns([4, 1])
     with col_bus:
         query = st.text_input("🔍 Buscar por Nombre, Marca o Categoría...", value=st.session_state.search_query)
@@ -164,21 +171,19 @@ def seccion_inventario():
             st.session_state.search_query = ""
             st.rerun()
 
-    # Cargar datos
+    # Carga de datos para la tabla central
     data_res = supabase.table("productos").select("*").execute()
     df = pd.DataFrame(data_res.data) if data_res.data else pd.DataFrame()
 
     if not df.empty:
         if query:
             st.session_state.search_query = query
-            # FILTRO FLEXIBLE: Busca la palabra en cualquier parte del texto
             mask = df.apply(lambda row: row.astype(str).str.contains(query, case=False, na=False)).any(axis=1)
             df_filtered = df[mask]
             
             st.write(f"Mostrando resultados para: **{query}**")
             st.table(df_filtered[["nombre", "marca", "categoria", "stock", "precio_venta"]].rename(columns={"nombre":"Producto","precio_venta":"Precio"}))
         else:
-            # Vista normal por pestañas
             df['categoria'] = df['categoria'].fillna("Otros").replace("", "Otros")
             cats = sorted(df['categoria'].unique())
             tabs = st.tabs(cats)
