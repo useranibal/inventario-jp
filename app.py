@@ -143,7 +143,7 @@ with st.sidebar:
     if not df_full.empty:
         bajo_count = len(df_full[df_full['stock'] <= STOCK_MINIMO])
         if bajo_count > 0:
-            st.markdown(f'<div class="stock-alert-bottom">⚠️ ATENCIÓN<br>Tienes {bajo_count} productos con<br>stock mínimo (≤ {STOCK_MINIMO})</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="stock-alert-bottom">⚠️ ATENCIÓN<br>Tienes {bajo_count} productos con<br>stock mínimo </div>', unsafe_allow_html=True)
 
 # --- 5. SISTEMA DE VENTAS ---
 st.markdown('<h1 style="background-color: #d35400; color: white; padding: 15px; text-align: center; border-radius: 10px;">📱 Sistema de Control JP</h1>', unsafe_allow_html=True)
