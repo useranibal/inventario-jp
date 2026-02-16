@@ -12,17 +12,17 @@ SHEET_ID = "1Z8o3YqmkrAHYQYeYhaxs1IwBeLlpo-b8FeGfBrqGKOk"
 URL_APPS_SCRIPT = "https://script.google.com/macros/s/AKfycbzCqf2L5AIM30JeSTvJlOBlAwCddu3Ss5WX9gwIN8ran8wZx83R8vb2xT2gQz9vwuOy/exec"
 URL_PRODUCTOS = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=productos"
 
-# --- 2. CSS PARA DISEÑO Y VISIBILIDAD ---
+# --- 2. CSS PARA DISEÑO (SIDEBAR OSCURO / DIÁLOGOS CLAROS) ---
 st.markdown("""
     <style>
     [data-testid="stSidebar"] { background-color: #2e2e2e !important; }
     [data-testid="stSidebar"] * { color: white !important; }
-    /* Fix para el texto dentro del expander de alertas */
-    [data-testid="stSidebar"] .stExpander details summary p { color: white !important; }
-    [data-testid="stSidebar"] .stExpander div[data-styled-content="true"] p { color: #ffffff !important; font-weight: bold; }
-    
     .stButton > button { width: 100%; border-radius: 8px; background-color: #4a4a4a; color: white !important; border: 1px solid #555; }
     .stock-alert-bottom { background-color: #e74c3c; color: white !important; padding: 12px; border-radius: 10px; text-align: center; font-weight: bold; border: 2px solid white; margin-top: 10px; }
+    
+    /* Forzar que el texto dentro de los diálogos sea legible (oscuro) */
+    div[data-testid="stDialog"] * { color: #31333F !important; }
+    div[data-testid="stDialog"] h2, div[data-testid="stDialog"] h3 { color: #1f1f1f !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -34,7 +34,6 @@ def cargar_datos():
     except: return pd.DataFrame()
 
 def ejecutar_accion_google(datos):
-    """Manda cualquier acción (venta, carga, nuevo) al script de Google"""
     try:
         response = requests.post(URL_APPS_SCRIPT, json=datos, timeout=15)
         return response.status_code == 200
@@ -50,8 +49,8 @@ def generar_ticket_js(datos):
     ticket_html = f"""
     <script>
     const win = window.open('', 'Ticket', 'width=450,height=700');
-    win.document.write('<html><head><style>body {{ width: 75mm; font-family: Courier, monospace; font-size: 12px; }} .header {{ text-align: center; }} .hr {{ border-top: 1px dashed black; margin: 10px 0; }}</style></head><body>');
-    win.document.write('<div class="header">📱 ALYCELL</div><div style="text-align:center;">Alicia Correa<br>+56 963539746</div><div class="hr"></div>');
+    win.document.write('<html><head><style>body {{ width: 75mm; font-family: Courier, monospace; padding: 10px; font-size: 12px; }} .header {{ text-align: center; }} .hr {{ border-top: 1px dashed black; margin: 10px 0; }}</style></head><body>');
+    win.document.write('<div class="header">📱 ALYCELL</div><div style="text-align:center;">Alicia Correa</div><div class="hr"></div>');
     if ({str(es_reparacion).lower()}) {{
         win.document.write('<div>CLIENTE: {datos.get('cliente', '')}</div><div>CEL: {datos.get('celular', '')}</div>');
     }}
@@ -69,61 +68,50 @@ df = cargar_datos()
 with st.sidebar:
     st.markdown("### 🛠 MENÚ ALYCELL")
     
-    # Detalle Alertas con color corregido
-    with st.expander("🚨 DETALLE ALERTAS"):
-        if not df.empty:
-            bajo = df[df['stock'] <= STOCK_MINIMO]
-            if not bajo.empty:
-                st.write("⚠️ Revisar stock de:")
-                st.table(bajo[["nombre", "stock"]])
-            else:
-                st.write("✅ Todo en orden")
+    # DIALOGO DE ALERTAS (VENTANA EMERGENTE)
+    @st.dialog("🚨 PRODUCTOS CON STOCK BAJO")
+    def mostrar_alertas():
+        bajo = df[df['stock'] <= STOCK_MINIMO]
+        if not bajo.empty:
+            st.write("Los siguientes productos requieren reposición:")
+            st.table(bajo[["nombre", "stock"]])
+        else:
+            st.success("¡Todo el stock está al día! ✅")
+        if st.button("Cerrar"): st.rerun()
 
-    # BOTÓN CARGA / NUEVO (FUNCIONAL)
+    if st.button("🚨 DETALLE ALERTAS"):
+        mostrar_alertas()
+
+    # DIALOGO DE CARGA/NUEVO (VENTANA EMERGENTE)
+    @st.dialog("➕ ADMINISTRAR INVENTARIO")
+    def modal_carga():
+        cod = st.text_input("Escanear o escribir código de barras")
+        if cod:
+            existente = df[df['codigo_barras'].astype(str).str.strip() == str(cod).strip()]
+            if not existente.empty:
+                prod = existente.iloc[0]
+                st.markdown(f"### {prod['nombre']}")
+                st.write(f"Stock actual: **{prod['stock']}**")
+                cantidad = st.number_input("¿Cuánto stock desea SUMAR?", min_value=1, value=1)
+                if st.button("🔄 ACTUALIZAR STOCK"):
+                    datos_envio = {"accion": "actualizar_stock", "codigo": str(cod).strip(), "cantidad": int(cantidad)}
+                    if ejecutar_accion_google(datos_envio):
+                        st.success("Stock actualizado")
+                        st.rerun()
+            else:
+                st.info("Producto nuevo detectado")
+                n_nom = st.text_input("Nombre")
+                n_mar = st.text_input("Marca")
+                n_cat = st.selectbox("Categoría", ["Accesorios", "Celulares", "Pantallas", "Otros"])
+                n_pre = st.number_input("Precio Venta", min_value=0)
+                n_stk = st.number_input("Stock Inicial", min_value=1)
+                if st.button("💾 GUARDAR NUEVO"):
+                    datos_envio = {"accion": "nuevo_producto", "codigo": str(cod).strip(), "nombre": n_nom, "marca": n_mar, "categoria": n_cat, "precio": int(n_pre), "stock": int(n_stk)}
+                    if ejecutar_accion_google(datos_envio):
+                        st.success("Producto creado")
+                        st.rerun()
+
     if st.button("➕ CARGA / NUEVO"):
-        @st.dialog("ADMINISTRAR INVENTARIO")
-        def modal_carga():
-            cod = st.text_input("Escanear o escribir código de barras")
-            if cod:
-                # Buscar si existe
-                existente = df[df['codigo_barras'].astype(str).str.strip() == str(cod).strip()]
-                
-                if not existente.empty:
-                    prod = existente.iloc[0]
-                    st.success(f"Producto encontrado: {prod['nombre']}")
-                    st.write(f"Stock actual: {prod['stock']}")
-                    cantidad = st.number_input("¿Cuánto stock desea SUMAR?", min_value=1, value=1)
-                    
-                    if st.button("🔄 ACTUALIZAR STOCK"):
-                        datos_envio = {
-                            "accion": "actualizar_stock",
-                            "codigo": str(cod).strip(),
-                            "cantidad": int(cantidad)
-                        }
-                        if ejecutar_accion_google(datos_envio):
-                            st.success("¡Stock actualizado en la base de datos!")
-                            st.rerun()
-                else:
-                    st.warning("Producto nuevo. Ingrese los datos:")
-                    n_nom = st.text_input("Nombre del producto")
-                    n_mar = st.text_input("Marca")
-                    n_cat = st.selectbox("Categoría", ["Accesorios", "Celulares", "Pantallas", "Otros"])
-                    n_pre = st.number_input("Precio Venta", min_value=0)
-                    n_stk = st.number_input("Stock Inicial", min_value=1)
-                    
-                    if st.button("💾 GUARDAR NUEVO"):
-                        datos_envio = {
-                            "accion": "nuevo_producto",
-                            "codigo": str(cod).strip(),
-                            "nombre": n_nom,
-                            "marca": n_mar,
-                            "categoria": n_cat,
-                            "precio": int(n_pre),
-                            "stock": int(n_stk)
-                        }
-                        if ejecutar_accion_google(datos_envio):
-                            st.success("¡Producto creado con éxito!")
-                            st.rerun()
         modal_carga()
 
     if not df.empty:
@@ -145,23 +133,13 @@ if barcode and not df.empty:
         def d_venta(item):
             st.markdown(f"## {item['nombre']}")
             st.markdown(f"<h1 style='color: #27ae60; text-align: center;'>{formatear_moneda(item['precio_venta'])}</h1>", unsafe_allow_html=True)
-            st.divider()
             tipo_op = st.radio("Tipo:", ["Venta Rápida", "Reparación"])
             c_nom, c_cel = "", ""
             if tipo_op == "Reparación":
                 c_nom = st.text_input("Nombre Cliente")
                 c_cel = st.text_input("Celular")
-            
             if st.button("✅ FINALIZAR"):
-                datos = {
-                    "accion": "venta",
-                    "nombre": item['nombre'], 
-                    "precio": int(item['precio_venta']), 
-                    "codigo": str(item['codigo_barras']), 
-                    "cliente": c_nom, 
-                    "celular": c_cel, 
-                    "tipo": tipo_op
-                }
+                datos = {"accion": "venta", "nombre": item['nombre'], "precio": int(item['precio_venta']), "codigo": str(item['codigo_barras']), "cliente": c_nom, "celular": c_cel, "tipo": tipo_op}
                 if ejecutar_accion_google(datos):
                     st.success("Registrado.")
                     generar_ticket_js(datos)
@@ -173,9 +151,8 @@ if barcode and not df.empty:
 # --- 7. VISTA DE TABLAS ---
 st.divider()
 if not df.empty:
-    if 'categoria' in df.columns:
-        categorias = sorted(df['categoria'].dropna().unique())
-        tabs = st.tabs(categorias)
-        for i, cat in enumerate(categorias):
-            with tabs[i]:
-                st.table(df[df['categoria'] == cat][["nombre", "marca", "stock", "precio_venta"]])
+    categorias = sorted(df['categoria'].dropna().unique())
+    tabs = st.tabs(categorias)
+    for i, cat in enumerate(categorias):
+        with tabs[i]:
+            st.table(df[df['categoria'] == cat][["nombre", "marca", "stock", "precio_venta"]])
