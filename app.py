@@ -9,7 +9,7 @@ STOCK_MINIMO = 3
 
 # TUS DATOS DE GOOGLE
 SHEET_ID = "1Z8o3YqmkrAHYQYeYhaxs1IwBeLlpo-b8FeGfBrqGKOk" 
-URL_APPS_SCRIPT = "https://script.google.com/macros/s/AKfycbyQ9OlxXZjwWuC-f2u2wS9m61mFmv5sFulPVc48_ClZzu49OQZkB_1mIPFQJzgCSwJL/exec"
+URL_APPS_SCRIPT = "https://script.google.com/macros/s/AKfycbzCqf2L5AIM30JeSTvJlOBlAwCddu3Ss5WX9gwIN8ran8wZx83R8vb2xT2gQz9vwuOy/exec"
 URL_PRODUCTOS = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=productos"
 
 # --- 2. CSS PARA DISEÑO Y VISIBILIDAD ---
